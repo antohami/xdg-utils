@@ -115,7 +115,15 @@ perform_action()
       ;;
 
     xfce)
-      [ -n "$DISPLAY" ] && screensaver_xserver "$1"
+      # xfce4-screensaver is not a required component in xfce
+      if dbus-send --print-reply --dest=org.freedesktop.DBus \
+        /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner \
+        string:org.xfce.ScreenSaver > /dev/null 2>&1; then
+          screensaver_xfce_screensaver "$1"
+      else
+      # fallback
+          [ -n "$DISPLAY" ] && screensaver_xserver "$1"
+      fi
       ;;
 
     ''|generic)
@@ -731,6 +739,88 @@ screensaver_cinnamon_screensaver()
             echo "disabled"
         else
             echo "ERROR: dbus org.cinnamon.ScreenSaver.GetActive returned '$status'" >&2
+            return 1
+        fi
+        ;;
+
+        *)
+        echo "ERROR: Unknown command '$1" >&2
+        return 1
+        ;;
+    esac
+}
+
+screensaver_xfce_screensaver()
+{
+# DBUS interface for xfce-screensaver
+# https://docs.xfce.org/apps/xfce4-screensaver/dbus
+    case "$1" in
+        suspend)
+        screensaver_suspend_loop \
+        dbus-send --session \
+                  --dest=org.xfce.ScreenSaver \
+                  --type=method_call \
+                  /org/xfce/ScreenSaver \
+                  org.xfce.ScreenSaver.SimulateUserActivity \
+                  2> /dev/null
+        result=$?
+        ;;
+
+        resume)
+        # Automatic resume when $screensaver_file disappears
+        result=0
+        ;;
+
+        activate)
+        dbus-send --session \
+                  --dest=org.xfce.ScreenSaver \
+                  --type=method_call \
+                  /org/xfce/ScreenSaver \
+                  org.xfce.ScreenSaver.SetActive \
+                  boolean:true \
+                  2> /dev/null
+        result=$?
+        ;;
+
+        lock)
+        dbus-send --session \
+                  --dest=org.xfce.ScreenSaver \
+                  --type=method_call \
+                  /org/xfce/ScreenSaver \
+                  org.xfce.ScreenSaver.Lock \
+                  string:"" \
+                  2> /dev/null
+
+        result=$?
+        ;;
+
+        reset)
+        # Turns the screensaver off right now
+        dbus-send --session \
+                  --dest=org.xfce.ScreenSaver \
+                  --type=method_call \
+                  /org/xfce/ScreenSaver \
+                  org.xfce.ScreenSaver.SimulateUserActivity \
+                 2> /dev/null
+        result=$?
+        ;;
+
+        status)
+        status=`dbus-send --session \
+                          --dest=org.xfce.ScreenSaver \
+                          --type=method_call \
+                          --print-reply \
+                          --reply-timeout=2000 \
+                          /org/xfce/ScreenSaver \
+                          org.xfce.ScreenSaver.GetActive \
+                          | grep boolean | cut -d ' ' -f 5`
+        result=$?
+        if [ x"$status" = "xtrue" ]; then
+            echo "enabled"
+        elif [ x"$status" = "xfalse" ]; then
+            echo "disabled"
+        else
+            echo "ERROR: dbus org.xfce.ScreenSaver.GetActive returned '$status'" >&2
             return 1
         fi
         ;;
